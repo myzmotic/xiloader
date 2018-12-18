@@ -33,9 +33,16 @@ std::string g_ServerAddress = "127.0.0.1"; // The server address to connect to.
 std::string g_ServerPort = "51220"; // The server lobby server port to connect to.
 std::string g_Username = ""; // The username being logged in with.
 std::string g_Password = ""; // The password being logged in with.
+std::string g_NewPassword = ""; // The password for resetting.
+std::string g_ConfirmPassword = ""; // The password for confirmation.
+std::string g_Email = ""; // The email address.
+std::string g_SecurityQuestionAnswer = ""; // The security question answer
+std::string g_SecurityQuestionID = ""; // Security question id
+UINT32 g_SecurityQuestionIDRecieved = 0; // Security question id recieved
 char* g_CharacterList = NULL; // Pointer to the character list data being sent from the server.
 bool g_IsRunning = false; // Flag to determine if the network threads should hault.
 bool g_Hide = false; // Determines whether or not to hide the console window after FFXI starts.
+bool g_Silent = false; // Should we log connection info on reset?
 
 /* Hairpin Fix Variables */
 DWORD g_NewServerAddress; // Hairpin server address to be overriden with.
@@ -135,7 +142,10 @@ DWORD ApplyHairpinFixThread(LPVOID lpParam)
  */
 hostent* __stdcall Mine_gethostbyname(const char* name)
 {
-    xiloader::console::output(xiloader::color::debug, "Resolving host: %s", name);
+	if (!g_Silent)
+	{
+		xiloader::console::output(xiloader::color::debug, "Resolving host: %s", name);
+	}
 
     if (!strcmp("ffxi00.pol.com", name))
         return Real_gethostbyname(g_ServerAddress.c_str());

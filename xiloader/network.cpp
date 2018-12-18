@@ -23,13 +23,25 @@ This file is part of DarkStar-server source code.
 
 #include "network.h"
 
+using namespace std;
+
 /* Externals */
 extern std::string g_ServerAddress;
+extern std::string g_ServerPort;
+
 extern std::string g_Username;
 extern std::string g_Password;
-extern std::string g_ServerPort;
+extern std::string g_NewPassword;
+extern std::string g_ConfirmPassword;
+extern std::string g_Email;
+extern std::string g_SecurityQuestionAnswer;
+extern std::string g_SecurityQuestionID;
+extern UINT32 g_SecurityQuestionIDRecieved;
+
 extern char* g_CharacterList;
 extern bool g_IsRunning;
+extern bool g_Silent;
+
 
 namespace xiloader
 {
@@ -81,7 +93,10 @@ namespace xiloader
                 return 0;
             }
 
-            xiloader::console::output(xiloader::color::info, "Connected to server!");
+			if (!g_Silent)
+			{
+				xiloader::console::output(xiloader::color::info, "Connected to server!");
+			}
             break;
         }
 
@@ -196,150 +211,635 @@ namespace xiloader
     }
 
     /**
-     * @brief Verifies the players login information; also handles creating new accounts.
+     * @brief Verifies the players login information; also handles account management.
      *
      * @param sock      The datasocket object with the connection socket.
      *
      * @return True on success, false otherwise.
      */
-    bool network::VerifyAccount(datasocket* sock)
-    {
-        static bool bFirstLogin = true;
+	bool network::VerifyAccount(datasocket* sock)
+	{
+		char recvBuffer[1024] = { 0 };
+		char sendBuffer[1024] = { 0 };
+		std::string input;
+		UINT32 q_id_i = 0;
+		stringstream q_id_con;
 
-        char recvBuffer[1024] = { 0 };
-        char sendBuffer[1024] = { 0 };
+		/* Create connection if required.. */
+		if (sock->s == NULL || sock->s == INVALID_SOCKET)
+		{
+			if (!xiloader::network::CreateConnection(sock, "54231"))
+				return false;
+		}
 
-        /* Create connection if required.. */
-        if (sock->s == NULL || sock->s == INVALID_SOCKET)
-        {
-            if (!xiloader::network::CreateConnection(sock, "54231"))
-                return false;
-        }
+		g_Silent = true;
 
-        /* Determine if we should auto-login.. */
-        bool bUseAutoLogin = !g_Username.empty() && !g_Password.empty() && bFirstLogin;
-        if (bUseAutoLogin)
-            xiloader::console::output(xiloader::color::lightgreen, "Autologin activated!");
+		login_menu:
 
-        if (!bUseAutoLogin)
-        {
-            xiloader::console::output("==========================================================");
-            xiloader::console::output("What would you like to do?");
-            xiloader::console::output("   1.) Login");
-            xiloader::console::output("   2.) Create New Account");
-            xiloader::console::output("==========================================================");
-            printf("\nEnter a selection: ");
+		xiloader::console::output("==========================================================");
+		xiloader::console::output("===============      LOGIN MENU    =======================");
+		xiloader::console::output("==========================================================");
+		xiloader::console::output("   1.) Login");
+		xiloader::console::output("   2.) Create Account");
+		xiloader::console::output("   3.) Forgot Password");
+		xiloader::console::output("==========================================================");
+		printf("\nEnter a selection: ");
 
-            std::string input;
-            std::cin >> input;
-            std::cout << std::endl;
+		std::cin >> input;
+		std::cout << std::endl;
 
-            /* User wants to log into an existing account.. */
-            if (input == "1")
-            {
-                xiloader::console::output("Please enter your login information.");
-                std::cout << "\nUsername: ";
-                std::cin >> g_Username;
-                std::cout << "Password: ";
-                g_Password.clear();
+		// Convert to int
+		q_id_con = (stringstream)input;
+		q_id_i = 0;
+		q_id_con >> q_id_i;
 
-                /* Read in each char and instead of displaying it. display a "*" */
-                char ch;
-                while ((ch = static_cast<char>(_getch())) != '\r')
-                {
-                    if (ch == '\0')
-                        continue;
-                    else if (ch == '\b')
-                    {
-                        if (g_Password.size())
-                        {
-                            g_Password.pop_back();
-                            std::cout << "\b \b";
-                        }
-                    }
-                    else
-                    {
-                        g_Password.push_back(ch);
-                        std::cout << '*';
-                    }
-                }
-                std::cout << std::endl;
+		if (q_id_i < 1 || q_id_i > 3)
+		{
+			xiloader::console::output("Invalid selection..");
+			goto login_menu;
+		}
 
-                sendBuffer[0x20] = 0x10;
-            }
-            /* User wants to create a new account.. */
-            else if (input == "2")
-            {
-            create_account:
-                xiloader::console::output("Please enter your desired login information.");
-                std::cout << "\nUsername (3-15 characters): ";
-                std::cin >> g_Username;
-                std::cout << "Password (6-15 characters): ";
-                std::cin >> g_Password;
-                std::cout << "Repeat Password           : ";
-                std::cin >> input;
-                std::cout << std::endl;
+		if (input == "1")
+		{
+			xiloader::console::output("Please enter your login information.");
+			std::cout << "\nUsername: ";
+			std::cin >> g_Username;
+			PromptForPassword();
+			std::cout << std::endl;
 
-                if (input != g_Password)
-                {
-                    xiloader::console::output(xiloader::color::error, "Passwords did not match! Please try again.");
-                    goto create_account;
-                }
+			sendBuffer[0x82] = LOGIN_ATTEMPT;
+			memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+			memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+			memcpy(sendBuffer + 0x20, g_Email.c_str(), 32);
+		}
+		else if (input == "2")
+		{
 
-                sendBuffer[0x20] = 0x20;
-            }
+		create_account:
+			xiloader::console::output("Please enter your desired login information.");
+			std::cout << "\nUsername (3-15 characters): ";
+			std::cin >> g_Username;
+			std::cout << "Password (6-15 characters): ";
+			std::cin >> g_Password;
+			std::cout << "Repeat Password           : ";
+			std::cin >> input;
 
-            std::cout << std::endl;
-        }
-        else
-        {
-            /* User has auto-login enabled.. */
-            sendBuffer[0x20] = 0x10;
-            bFirstLogin = false;
-        }
+			if (input != g_Password)
+			{
+				xiloader::console::output(xiloader::color::error, "Passwords did not match! Please try again.");
+				goto create_account;
+			}
 
-        /* Copy username and password into buffer.. */
-        memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
-        memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+			std::cout << "Email: ";
+			std::cin >> g_Email;
+			std::cout << std::endl;
 
-        /* Send info to server and obtain response.. */
-        send(sock->s, sendBuffer, 33, 0);
-        recv(sock->s, recvBuffer, 16, 0);
+			std::cout << "Would you like to setup a security question? y/n: ";
 
-        /* Handle the obtained result.. */
-        switch (recvBuffer[0])
-        {
-        case 0x0001: // Success (Login)
-            xiloader::console::output(xiloader::color::success, "Successfully logged in as %s!", g_Username.c_str());
-            sock->AccountId = *(UINT32*)(recvBuffer + 0x01);
-            closesocket(sock->s);
-            sock->s = INVALID_SOCKET;
-            return true;
+			std::cin >> input;
 
-        case 0x0002: // Error (Login)
-            xiloader::console::output(xiloader::color::error, "Failed to login. Invalid username or password.");
-            closesocket(sock->s);
-            sock->s = INVALID_SOCKET;
-            return false;
+			if (input == "y") 
+			{ 
+				ChangeSecurityQuestion(); 
+			}
 
-        case 0x0003: // Success (Create Account)
-            xiloader::console::output(xiloader::color::success, "Account successfully created!");
-            closesocket(sock->s);
-            sock->s = INVALID_SOCKET;
-            return false;
+			xiloader::console::output(xiloader::color::green, "Please review your information:");
+			std::cout << "Username:  " + g_Username;
+			std::cout << "\nPassword:  " + g_Password;
+			std::cout << "\nEmail:  " + g_Email;
 
-        case 0x0004: // Error (Create Account)
-            xiloader::console::output(xiloader::color::error, "Failed to create the new account. Username already taken.");
-            closesocket(sock->s);
-            sock->s = INVALID_SOCKET;
-            return false;
-        }
+			if (g_SecurityQuestionAnswer != "")
+			{
+				if (g_SecurityQuestionID == "1")
+				{
+					std::cout << "\nQuestion: What is your pets name?";
+				}
+				else if (g_SecurityQuestionID == "2")
+				{
+					std::cout << "\nQuestion: In what year was your father born?";
+				}
+				else if (g_SecurityQuestionID == "3")
+				{
+					std::cout << "\nQuestion: In what town or city was your first full time job?";
+				}
+				else if (g_SecurityQuestionID == "4")
+				{
+					std::cout << "\nQuestion: What are the last five digits of your drivers licence number?";
+				}
+				else if (g_SecurityQuestionID == "5")
+				{
+					std::cout << "\nQuestion: What is your spouse or partners mothers maiden name?";
+				}
 
-        /* We should not get here.. */
-        closesocket(sock->s);
-        sock->s = INVALID_SOCKET;
-        return false;
-    }
+				std::cout << "\nAnswer:  " + g_SecurityQuestionAnswer;
+			}
+			else
+			{
+				xiloader::console::output(xiloader::color::info, " ");
+				xiloader::console::output(xiloader::color::info, "** Opted out of security question.");
+				xiloader::console::output(xiloader::color::info, "** You will not be able to recover your password without one set.");
+			    xiloader::console::output(xiloader::color::info, "** You may set one at anytime after account has been created.\n");
+			}
+
+			std::cout << "\nIs this correct? y/n";
+
+			std::cin >> input;
+			std::cout << std::endl;
+
+			if (input == "y")
+			{
+				sendBuffer[0x82] = LOGIN_CREATE;
+				memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+				memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+				memcpy(sendBuffer + 0x20, g_Email.c_str(), 32);
+				memcpy(sendBuffer + 0x40, g_SecurityQuestionAnswer.c_str(), 64);
+				memcpy(sendBuffer + 0x80, g_SecurityQuestionID.c_str(), 2);
+			}
+			else
+			{
+				goto create_account;
+			}
+		}
+		else if (input == "3")
+		{
+			xiloader::console::output("Please enter your username.");
+			std::cout << "\nPlease enter your username: ";
+			std::cin >> g_Username;
+
+			sendBuffer[0x82] = LOGIN_RECOVER;
+			memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+
+			send(sock->s, sendBuffer, 131, 0);
+			recv(sock->s, recvBuffer, 32, 0);
+
+			switch (recvBuffer[0])
+			{
+			case SUCCESS_USERFOUND: 
+
+				g_SecurityQuestionIDRecieved = *(UINT32*)(recvBuffer + 0x10);
+
+				if (g_SecurityQuestionIDRecieved == 0)
+				{
+					xiloader::console::output(xiloader::color::error, "** A security question was not setup.");
+					xiloader::console::output(xiloader::color::error, "** Please contact an admin.");
+					closesocket(sock->s);
+					sock->s = INVALID_SOCKET;
+					return false;
+				}
+
+				closesocket(sock->s);
+				sock->s = INVALID_SOCKET;
+			    if (!xiloader::network::CreateConnection(sock, "54231"))
+					return false;
+
+				xiloader::console::output("Please answer the security question to reset your password.");
+
+				if (g_SecurityQuestionIDRecieved == 1)
+				{
+					std::cout << "Question: What is your pets name?";
+				}
+				else if (g_SecurityQuestionIDRecieved == 2)
+				{
+					std::cout << "Question: In what year was your father born?";
+				}
+				else if (g_SecurityQuestionIDRecieved == 3)
+				{
+					std::cout << "Question: In what town or city was your first full time job?";
+				}
+				else if (g_SecurityQuestionIDRecieved == 4)
+				{
+					std::cout << "Question: What are the last five digits of your drivers licence number?";
+				}
+				else if (g_SecurityQuestionIDRecieved == 5)
+				{
+					std::cout << "Question: What is your spouse or partners mothers maiden name?";
+				}
+
+				std::cout << "\nYour Answer: ";
+				std::getline(std::cin >> std::ws, g_SecurityQuestionAnswer);
+
+
+				sendBuffer[0x82] = LOGIN_SQATTEMPT;
+				memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+				memcpy(sendBuffer + 0x40, g_SecurityQuestionAnswer.c_str(), 64);
+			    memcpy(sendBuffer + 0x80, std::to_string(g_SecurityQuestionIDRecieved).c_str(), 2);
+
+				
+				send(sock->s, sendBuffer, 131, 0);
+				recv(sock->s, recvBuffer, 32, 0);
+
+				switch (recvBuffer[0])
+				{
+				case SUCCESS_SQCHANGED:
+
+					closesocket(sock->s);
+					sock->s = INVALID_SOCKET;
+					if (!xiloader::network::CreateConnection(sock, "54231"))
+						return false;
+
+					xiloader::console::output(xiloader::color::green, "Verified! Enter your new password below.");
+				sq_password_change:
+
+					std::cout << "\nNew Password (6-15 characters): ";
+					std::cin >> g_NewPassword;
+					std::cout << "Repeat New Password           : ";
+					std::cin >> input;
+
+					if (input != g_NewPassword)
+					{
+						xiloader::console::output(xiloader::color::error, "Passwords did not match! Please try again.");
+						goto sq_password_change;
+					}
+
+					sendBuffer[0x82] = LOGIN_PASS;
+					memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+					memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+					memcpy(sendBuffer + 0x20, g_NewPassword.c_str(), 16); // We use the email field (as 16)
+
+					send(sock->s, sendBuffer, 131, 0);
+					recv(sock->s, recvBuffer, 32, 0);
+
+					switch (recvBuffer[0])
+					{
+					case SUCCESS_PASS:
+						xiloader::console::output(xiloader::color::green, "Password updated!");
+						closesocket(sock->s);
+						sock->s = INVALID_SOCKET;
+						return false;
+
+					case ERROR_PASS:
+						xiloader::console::output(xiloader::color::error, "Failed to change password..");
+						closesocket(sock->s);
+						sock->s = INVALID_SOCKET;
+						return false;
+					}
+
+					break;
+				case ERROR_SQFAILED:
+					xiloader::console::output(xiloader::color::error, "Incorrect answer..  Try again.");
+					closesocket(sock->s);
+					sock->s = INVALID_SOCKET;
+					return false;
+				}
+				break;
+			case ERROR_USERFOUND:
+				xiloader::console::output(xiloader::color::error, "No user with that name found.");
+				closesocket(sock->s);
+				sock->s = INVALID_SOCKET;
+				return false;
+			}
+
+			xiloader::console::output(xiloader::color::error, "Error Unknown..");
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return false;
+		}
+
+	send_data:
+
+		/* Send info to server and obtain response.. */
+		send(sock->s, sendBuffer, 131, 0);
+		recv(sock->s, recvBuffer, 32, 0);
+
+		/* Handle the obtained result.. */
+		switch (recvBuffer[0])
+		{
+		case SUCCESS_LOGIN: // Success (Login)
+			xiloader::console::output(xiloader::color::success, "Successfully logged in as %s!", g_Username.c_str());
+			sock->AccountId = *(UINT32*)(recvBuffer + 0x10);
+			break;
+
+		case SUCCESS_CREATE: // Success (Create Account)
+			xiloader::console::output(xiloader::color::success, "Account successfully created!");
+			sock->AccountId = *(UINT32*)(recvBuffer + 0x10);
+			break;
+
+		case ERROR_LOGIN: // Error (Login)
+			xiloader::console::output(xiloader::color::error, "Failed to login. Invalid username or password.");
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return false;
+
+		case ERROR_CREATE: // Error (Create Account)
+			xiloader::console::output(xiloader::color::error, "Failed to create the new account. Username already taken.");
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return false;
+		}
+
+
+	main_menu:
+
+		closesocket(sock->s);
+		sock->s = INVALID_SOCKET;
+		if (!xiloader::network::CreateConnection(sock, "54231"))
+			return false;
+
+		xiloader::console::output(" ");
+		xiloader::console::output("==========================================================");
+		xiloader::console::output("================      MAIN MENU    =======================");
+		xiloader::console::output("==========================================================");
+		xiloader::console::output("   1.) Play FFXI - Dark Aerith");
+		xiloader::console::output("   2.) Change Email");
+		xiloader::console::output("   3.) Change Password");
+		xiloader::console::output("   4.) Setup Security Question");
+		xiloader::console::output("   5.) Logout");
+		xiloader::console::output("==========================================================");
+		printf("\nEnter a selection: ");
+
+		std::cin >> input;
+		std::cout << std::endl;
+
+		// Convert to int
+		stringstream q1_id_con(input);
+		q_id_i = 0;
+		q1_id_con >> q_id_i;
+
+		if (q_id_i < 1 || q_id_i > 5)
+		{
+			xiloader::console::output("Invalid selection..");
+			goto main_menu;
+		}
+
+		if (input == "1")
+		{
+			sendBuffer[0x82] = SHUTDOWN;
+			send(sock->s, sendBuffer, 131, 0);
+
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return true;
+		}
+		else if (input == "2")
+		{
+			xiloader::console::output("Verify your password then tell us what your new email should be?");
+
+			PromptForConfirmPassword();
+
+			if (g_ConfirmPassword != g_Password)
+			{
+				std::cout << std::endl;
+				xiloader::console::output(xiloader::color::error, "Failed to verify password..");
+				goto main_menu;
+			}
+			else
+			{ 
+				std::cout << "\nNew Email: ";
+				std::cin >> g_Email;
+				std::cout << std::endl;
+
+				sendBuffer[0x82] = LOGIN_EMAIL;
+				memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+				memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+				memcpy(sendBuffer + 0x20, g_Email.c_str(), 32);
+			}
+		}
+		else if (input == "3")
+		{
+			xiloader::console::output("Verify your password then tell us what your new password should be?");
+
+			PromptForConfirmPassword();
+
+			if (g_ConfirmPassword != g_Password)
+			{
+				std::cout << std::endl;
+				xiloader::console::output(xiloader::color::error, "Failed to verify password..");
+				goto main_menu;
+			}
+			else
+			{
+				password_change:
+
+				std::cout << "\nNew Password (6-15 characters): ";
+				std::cin >> g_NewPassword;
+				std::cout << "Repeat New Password           : ";
+				std::cin >> input;
+
+				if (input != g_NewPassword)
+				{
+					xiloader::console::output(xiloader::color::error, "Passwords did not match! Please try again.");
+					goto password_change;
+				}
+
+				sendBuffer[0x82] = LOGIN_PASS;
+				memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+				memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+				memcpy(sendBuffer + 0x20, g_NewPassword.c_str(), 16); // We use the email field (as 16)
+			}
+		}
+		else if (input == "4")
+		{
+			xiloader::console::output("Verify your password first.");
+
+			PromptForConfirmPassword();
+
+			if (g_ConfirmPassword != g_Password)
+			{
+				std::cout << std::endl;
+				xiloader::console::output(xiloader::color::error, "Failed to verify password..");
+				goto main_menu;
+			}
+			else
+			{
+			    choose_ques:
+
+				std::cout << std::endl;
+
+				xiloader::console::output("What do you want your security question to be?");
+				xiloader::console::output("   1.) What is your pets name?");
+				xiloader::console::output("   2.) In what year was your father born?");
+				xiloader::console::output("   3.) In what town or city was your first full time job?");
+				xiloader::console::output("   4.) What are the last five digits of your drivers licence number?");
+				xiloader::console::output("   5.) What is your spouse or partners mothers maiden name?");
+				printf("\nEnter a selection: ");
+
+				std::cin >> g_SecurityQuestionID;
+				std::cout << std::endl;
+
+				// Convert to int
+				stringstream sq_id_con(g_SecurityQuestionID);
+				int sq_id_i = 0;
+				sq_id_con >> sq_id_i;
+
+				if (sq_id_i < 1 || sq_id_i > 5)
+				{
+					xiloader::console::output("Invalid selection..");
+					goto choose_ques;
+				}
+
+				std::cout << "\nYour Answer: ";
+				std::getline(std::cin >> std::ws, g_SecurityQuestionAnswer);
+
+				sendBuffer[0x82] = LOGIN_SEC_CODE;
+				memcpy(sendBuffer + 0x00, g_Username.c_str(), 16);
+				memcpy(sendBuffer + 0x10, g_Password.c_str(), 16);
+				memcpy(sendBuffer + 0x40, g_SecurityQuestionAnswer.c_str(), 64);
+				memcpy(sendBuffer + 0x80, g_SecurityQuestionID.c_str(), 2);
+			}
+		}
+		else if (input == "5")
+		{
+			xiloader::console::output(xiloader::color::success, "Logged out successfully!\n");
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return false;
+		}
+
+		/* Send info to server and obtain response.. */
+		send(sock->s, sendBuffer, 131, 0);
+		recv(sock->s, recvBuffer, 32, 0);
+
+		/* Handle the obtained result.. */
+		switch (recvBuffer[0])
+		{
+		case SUCCESS_EMAIL: 
+			xiloader::console::output(xiloader::color::success, "Successfully changed email!");
+			goto main_menu;
+			break;
+
+		case SUCCESS_PASS: 
+			xiloader::console::output(xiloader::color::success, "Successfully changed password!");
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
+			return false;
+
+		case SUCCESS_SEC_CODE: 
+			xiloader::console::output(xiloader::color::success, "Successfully changed security question!");
+			goto main_menu;
+			break;
+
+		case ERROR_EMAIL:
+			xiloader::console::output(xiloader::color::error, "Failed to change email..");
+			goto main_menu;
+			break;
+
+		case ERROR_PASS: 
+			xiloader::console::output(xiloader::color::error, "Failed to change password..");
+			goto main_menu;
+			break;
+
+		case ERROR_SEC_CODE:
+			xiloader::console::output(xiloader::color::error, "Failed to change security question..");
+			goto main_menu;
+			break;
+		}
+
+
+		xiloader::console::output(xiloader::color::success, "Logged out!\n");
+		closesocket(sock->s);
+		sock->s = INVALID_SOCKET;
+		return false;
+	}
+
+	/**
+	* @brief Gets user's password
+	*
+	* @param null
+	*
+	* @return null
+	*/
+	void network::PromptForPassword()
+	{
+		std::cout << "Password: ";
+		g_Password.clear();
+
+		/* Read in each char and instead of displaying it. display a "*" */
+		char ch;
+		while ((ch = static_cast<char>(_getch())) != '\r')
+		{
+			if (ch == '\0')
+				continue;
+			else if (ch == '\b')
+			{
+				if (g_Password.size())
+				{
+					g_Password.pop_back();
+					std::cout << "\b \b";
+				}
+			}
+			else
+			{
+				g_Password.push_back(ch);
+				std::cout << '*';
+			}
+		}
+	}
+
+	/**
+	* @brief Gets user's password
+	*
+	* @param null
+	*
+	* @return null
+	*/
+	void network::PromptForConfirmPassword()
+	{
+		std::cout << "Verify Your Password: ";
+		g_ConfirmPassword.clear();
+
+		/* Read in each char and instead of displaying it. display a "*" */
+		char ch;
+		while ((ch = static_cast<char>(_getch())) != '\r')
+		{
+			if (ch == '\0')
+				continue;
+			else if (ch == '\b')
+			{
+				if (g_ConfirmPassword.size())
+				{
+					g_ConfirmPassword.pop_back();
+					std::cout << "\b \b";
+				}
+			}
+			else
+			{
+				g_ConfirmPassword.push_back(ch);
+				std::cout << '*';
+			}
+		}
+	}
+
+
+	/**
+	* @brief Change security question prompt
+	*
+	* @param null
+	*
+	* @return null
+	*/
+	void network::ChangeSecurityQuestion()
+	{
+	choose_ques:
+		std::cout << "\n";
+		xiloader::console::output("==========================================================");
+		xiloader::console::output("Question Choice");
+		xiloader::console::output("   1.) What is your pets name?");
+		xiloader::console::output("   2.) In what year was your father born?");
+		xiloader::console::output("   3.) In what town or city was your first full time job?");
+		xiloader::console::output("   4.) What are the last five digits of your drivers licence number?");
+		xiloader::console::output("   5.) What is your spouse or partners mothers maiden name?");
+		xiloader::console::output("==========================================================");
+		printf("\nEnter a selection: ");
+
+		std::cin >> g_SecurityQuestionID;
+		std::cout << std::endl;
+
+		// Convert to int
+		stringstream sq_id_con(g_SecurityQuestionID);
+		UINT32 sq_id_i = 0;
+		sq_id_con >> sq_id_i;
+
+		if (sq_id_i < 1 || sq_id_i > 5)
+		{
+			xiloader::console::output("Invalid selection..");
+			goto choose_ques;
+		}
+
+		std::cout << "\nYour Answer: ";
+		std::getline(std::cin >> std::ws, g_SecurityQuestionAnswer);
+	
+		std::cout << std::endl;
+	}
 
     /**
      * @brief Data communication between the local client and the game server.

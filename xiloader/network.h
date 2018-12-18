@@ -33,8 +33,38 @@ This file is part of DarkStar-server source code.
 #include <Windows.h>
 #include <string>
 #include <conio.h>
+#include <iostream> 
+#include <sstream> 
 
 #include "console.h"
+
+#define LOGIN_ATTEMPT      0x10
+#define LOGIN_CREATE       0x20
+#define LOGIN_EMAIL        0x30
+#define LOGIN_PASS         0x40
+#define LOGIN_SEC_CODE	   0x50
+#define LOGIN_RECOVER      0x60
+#define LOGIN_SQATTEMPT    0x70
+
+#define SUCCESS_LOGIN      0x01
+#define SUCCESS_CREATE     0x02
+#define SUCCESS_EMAIL      0x03
+#define SUCCESS_PASS       0x04
+#define SUCCESS_SEC_CODE   0x05
+
+#define ERROR_LOGIN        0x06
+#define ERROR_CREATE       0x07
+#define ERROR_EMAIL        0x08
+#define ERROR_PASS         0x09
+#define ERROR_SEC_CODE	   0x10
+
+#define SUCCESS_USERFOUND  0x11
+#define ERROR_USERFOUND    0x12
+
+#define SUCCESS_SQCHANGED  0x13
+#define ERROR_SQFAILED     0x14
+
+#define SHUTDOWN           0x15
 
 namespace xiloader
 {
@@ -116,6 +146,33 @@ namespace xiloader
          * @return True on success, false otherwise.
          */
         static bool VerifyAccount(datasocket* sock);
+
+		/**
+		* @brief Gets user's password
+		*
+		* @param null
+		*
+		* @return null
+		*/
+		static void PromptForPassword();
+
+		/**
+		* @brief Gets user's password
+		*
+		* @param null
+		*
+		* @return null
+		*/
+		static void PromptForConfirmPassword();
+
+		/**
+		* @brief Change security question prompt
+		*
+		* @param null
+		*
+		* @return null
+		*/
+		static void ChangeSecurityQuestion();
         
         /**
          * @brief Starts the data communication between the client and server.
