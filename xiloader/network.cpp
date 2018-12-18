@@ -506,12 +506,14 @@ namespace xiloader
 		{
 		case SUCCESS_LOGIN: // Success (Login)
 			xiloader::console::output(xiloader::color::success, "Successfully logged in as %s!", g_Username.c_str());
-			sock->AccountId = *(UINT32*)(recvBuffer + 0x10);
+			sock->AccountId = *(UINT32*)(recvBuffer + 0x01);
+			closesocket(sock->s);
+			sock->s = INVALID_SOCKET;
 			break;
 
 		case SUCCESS_CREATE: // Success (Create Account)
 			xiloader::console::output(xiloader::color::success, "Account successfully created!");
-			sock->AccountId = *(UINT32*)(recvBuffer + 0x10);
+			sock->AccountId = *(UINT32*)(recvBuffer + 0x01);
 			break;
 
 		case ERROR_LOGIN: // Error (Login)
@@ -563,11 +565,8 @@ namespace xiloader
 
 		if (input == "1")
 		{
-			sendBuffer[0x82] = SHUTDOWN;
-			send(sock->s, sendBuffer, 131, 0);
-
-			closesocket(sock->s);
-			sock->s = INVALID_SOCKET;
+			//sendBuffer[0x82] = SHUTDOWN;
+			//send(sock->s, sendBuffer, 131, 0);
 			return true;
 		}
 		else if (input == "2")
